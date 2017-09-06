@@ -8,21 +8,28 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
-	"strings"
 	"time"
+
+	"github.com/gobwas/glob"
 )
 
-type portMap map[string]string
+type hostPortPair struct {
+	host glob.Glob
+	port string
+}
 
-func buildProxy(addr string, pMap portMap, defPort string) *http.Server {
+func buildProxy(addr string, pMap []hostPortPair, defPort string) *http.Server {
 	director := func(req *http.Request) {
 		host, _, err := net.SplitHostPort(req.Host)
 		if err != nil {
 			host = req.Host
 		}
-		port, found := pMap[strings.ToLower(host)]
-		if !found {
-			port = defPort
+		port := defPort
+		for _, pair := range pMap {
+			if pair.host.Match(host) {
+				port = pair.port
+				break
+			}
 		}
 		req.URL.Scheme = "http"
 		req.URL.Host = "localhost:" + port
@@ -37,15 +44,15 @@ func buildProxy(addr string, pMap portMap, defPort string) *http.Server {
 	}
 }
 
-func buildMapAndDefPort(mapList []string) (portMap, string, error) {
+func buildMapAndDefPort(mapList []string) ([]hostPortPair, string, error) {
 	var defPort = ""
-	var pMap = make(portMap, len(mapList))
-	for _, mapping := range mapList {
+	var pMap = make([]hostPortPair, len(mapList))
+	for i, mapping := range mapList {
 		host, port, err := net.SplitHostPort(mapping)
 		if err != nil {
 			return pMap, defPort, err
 		}
-		pMap[host] = port
+		pMap[i] = hostPortPair{host: glob.MustCompile(host), port: port}
 		if defPort == "" {
 			defPort = port
 		}
